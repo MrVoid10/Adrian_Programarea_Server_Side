@@ -1,0 +1,12 @@
+{
+  "username": "API_Server",
+  "password": "ParolaExtremDeSecreta",
+  "database": "AdryTech",
+  "server": "DESKTOP-7G128L0\\SQLEXPRESS",
+  "ssl_context": {
+    "cert": "SSL_Certificates/cert.pem",
+    "key": "SSL_Certificates/key.pem"
+  },
+  "jwt_secret_key": "Cheie_Secreta",
+  "allowed_terms": ["query","sql", "test", "sql query","TESTSQL"]
+}

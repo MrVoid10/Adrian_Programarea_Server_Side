@@ -1,0 +1,11 @@
+# Ignore all VS Code settings folders
+.vscode/
+**/.vscode/
+
+# Ignore all Python cache folders
+__pycache__/
+**/__pycache__/
+
+# Ignore all folders named Prototip
+Prototip/
+**/Prototip/
