@@ -1,8 +1,8 @@
 {
   "username": "API_Server",
   "password": "ParolaExtremDeSecreta",
-  "database": "AdryTech",
-  "server": "DESKTOP-7G128L0\\SQLEXPRESS",
+  "database": "Magazin_Tehnic",
+  "server": "MariusPC\\SQLEXPRESS",
   "ssl_context": {
     "cert": "SSL_Certificates/cert.pem",
     "key": "SSL_Certificates/key.pem"
