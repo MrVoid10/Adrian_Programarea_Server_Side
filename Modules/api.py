@@ -1,12 +1,5 @@
 from flask import Blueprint, jsonify, request, abort
-import json
-
-with open('Modules/hardcoded.json', 'r') as f:
-  DateSQl = json.load(f)
-products = DateSQl['products']
-stock = DateSQl['stock']
-users = DateSQl['users']
-orders = DateSQl['orders']
+from Modules.misc import products,stock,users,orders
 
 api = Blueprint("api", __name__)
 
@@ -18,7 +11,7 @@ def get_list():
 # Nivel 6: GET /details/{id} #
 @api.route("/produse", methods=["GET"])
 @api.route("/produse/<int:product_id>", methods=["GET"])
-@api.route("/details/<int:product_id>", methods=["GET"])
+@api.route("/details/<int:product_id>", methods=["GET"]) # conditila la nivel 6 #
 def get_product_details(product_id):
   if product_id is None:
     return jsonify(products)
@@ -106,22 +99,6 @@ def search_orders():
 
   return jsonify(result)
 
-# Nivel 8: căutare cu query params
-# @api.route("/search", methods=["GET"])
-# def search_products():
-#   name = request.args.get("name", "").lower()
-#   min_price = request.args.get("minPrice", type=int)
-#   max_price = request.args.get("maxPrice", type=int)
-
-#   results = products
-#   if name:
-#     results = [p for p in results if name in p["name"].lower()]
-#   if min_price is not None:
-#     results = [p for p in results if p["price"] >= min_price]
-#   if max_price is not None:
-#     results = [p for p in results if p["price"] <= max_price]
-
-#   return jsonify(results)
 
 # Nivel 9: public vs admin
 # @api.route("/public/list", methods=["GET"])
