@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, abort
-from Modules.misc import products,stock,users,orders
+from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table
 
 api = Blueprint("api", __name__)
 
@@ -98,6 +98,231 @@ def search_orders():
     result.append(o)
 
   return jsonify(result)
+
+# Nivel 9 /add #
+@api.route("/add", methods=["POST"])
+@api.route("/add/<string:table>", methods=["POST"])
+def add_data(table=None):
+    # preluăm datele JSON
+    data = request.get_json() if request.is_json else request.args
+    if not data:
+        return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
+
+    # dacă tabelul nu e specificat în URL, îl deducem din JSON
+    if not table:
+        if len(data) != 1:
+            return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
+        table, objects = next(iter(data.items()))
+    else:
+        objects = data
+
+    table = table.lower()
+    
+    # încărcăm lista de obiecte
+    items = load_table(table)  # load_table returnează listă de dict-uri
+
+    # schema tabelului
+    schema = TABLE_SCHEMAS.get(table, {})
+    if not schema:
+        return jsonify({"error": f"Schema pentru '{table}' nu există"}), 400
+
+    # dacă data nu e listă, o transformăm într-una
+    objects = objects if isinstance(objects, list) else [objects]
+
+    added_ids = []
+    warnings = []
+
+    for obj in objects:
+        # generăm id nou
+        new_id = max((item.get("id", 0) for item in items), default=0) + 1
+        new_obj = {**schema, **obj}
+        new_obj["id"] = new_id
+
+        # verificăm câmpuri lipsă
+        missing = [k for k in schema if k not in obj and k != "id"]
+        if missing:
+            warnings.append(f"Obiect id={new_id}: câmpuri lipsă completate automat: {', '.join(missing)}")
+
+        items.append(new_obj)
+        added_ids.append(new_id)
+
+    # salvăm lista actualizată
+    save_table(table, items)
+
+    response = {
+        "message": f"{len(added_ids)} obiect(e) adăugat(e) în '{table}'",
+        "ids": added_ids
+    }
+    if warnings:
+        response["warnings"] = warnings
+
+    return jsonify(response), 201
+
+# Nivel 9 /delete cu resortare ID-uri
+@api.route("/delete", methods=["DELETE"])
+@api.route("/delete/<string:table>", methods=["DELETE"])
+def delete_data(table=None):
+    data = request.get_json() if request.is_json else request.args
+    if not data:
+        return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
+
+    if not table:
+        if len(data) != 1:
+            return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
+        table, objects = next(iter(data.items()))
+    else:
+        objects = data
+
+    table = table.lower()
+    items = load_table(table)
+    if not isinstance(items, list):
+        return jsonify({"error": f"Structura tabelului '{table}' este invalidă"}), 500
+
+    objects = objects if isinstance(objects, list) else [objects]
+
+    deleted_ids = []
+    warnings = []
+
+    for obj in objects:
+        obj_id = obj.get("id")
+        if obj_id is None:
+            warnings.append("Un obiect nu are id specificat și nu a fost șters")
+            continue
+
+        match_found = any(item.get("id") == obj_id for item in items)
+        if not match_found:
+            warnings.append(f"Obiect cu id={obj_id} nu există în '{table}'")
+            continue
+
+        items = [item for item in items if item.get("id") != obj_id]
+        deleted_ids.append(obj_id)
+
+    # Resortăm ID-urile pentru a fi consecutive
+    for index, item in enumerate(items, start=1):
+        item["id"] = index
+
+    save_table(table, items)
+
+    response = {
+        "message": f"{len(deleted_ids)} obiect(e) șters(e) din '{table}'",
+        "ids": deleted_ids
+    }
+    if warnings:
+        response["warnings"] = warnings
+
+    return jsonify(response), 200 if deleted_ids else 404
+
+# Nivel 9 /update #
+@api.route("/update", methods=["PUT", "PATCH"])
+@api.route("/update/<string:table>", methods=["PUT", "PATCH"])
+def update_data(table=None):
+    data = request.get_json() if request.is_json else request.args
+    if not data:
+        return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
+
+    # Deducem tabelul dacă nu e în URL
+    if not table:
+        if len(data) != 1:
+            return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
+        table, objects = next(iter(data.items()))
+    else:
+        objects = data
+
+    table = table.lower()
+    items = load_table(table)
+    if not isinstance(items, list):
+        return jsonify({"error": f"Structura tabelului '{table}' este invalidă"}), 500
+
+    # Transformăm într-o listă dacă e un singur obiect
+    objects = objects if isinstance(objects, list) else [objects]
+
+    updated_ids = []
+    warnings = []
+
+    for obj in objects:
+        update_fields = obj.get("update", obj)
+        filter_criteria = obj.get("filter", {})
+        obj_id = obj.get("id")
+        obj_ids = obj.get("ids", [])
+
+        matched_items = []
+
+        # Căutăm după id
+        if obj_id is not None:
+            existing_obj = next((item for item in items if item.get("id") == obj_id), None)
+            if existing_obj:
+                matched_items.append(existing_obj)
+            else:
+                warnings.append(f"Obiect cu id={obj_id} nu există în '{table}'")
+                continue
+
+        # Căutăm după ids
+        elif obj_ids:
+            for i in obj_ids:
+                existing_obj = next((item for item in items if item.get("id") == i), None)
+                if existing_obj:
+                    matched_items.append(existing_obj)
+                else:
+                    warnings.append(f"Obiect cu id={i} nu există în '{table}'")
+        
+        # Căutăm după filter avansat
+        elif filter_criteria:
+            for item in items:
+                match = True
+                for k, v in filter_criteria.items():
+                    current_val = item.get(k)
+                    if isinstance(v, dict):
+                        # LIKE
+                        if "like" in v:
+                            if not isinstance(current_val, str) or v["like"].lower() not in current_val.lower():
+                                match = False
+                                break
+                        # RANGE
+                        min_val = v.get("min", float("-inf"))
+                        max_val = v.get("max", float("inf"))
+                        if isinstance(current_val, (int, float)):
+                            if not (min_val <= current_val <= max_val):
+                                match = False
+                                break
+                        else:
+                            if "min" in v or "max" in v:
+                                match = False
+                                break
+                    else:
+                        # exact match
+                        if current_val != v:
+                            match = False
+                            break
+                if match:
+                    matched_items.append(item)
+
+            if not matched_items:
+                warnings.append(f"Nu s-a găsit niciun obiect pentru filter-ul specificat în '{table}'")
+                continue
+
+        else:
+            warnings.append("Un obiect nu are id, ids sau filter specificat și nu a fost actualizat")
+            continue
+
+        # Actualizăm obiectele potrivite
+        for item in matched_items:
+            for key, value in update_fields.items():
+                if key == "id":
+                    continue
+                item[key] = value
+            updated_ids.append(item.get("id"))
+
+    # Salvăm lista actualizată
+    save_table(table, items)
+
+    response = {
+        "message": f"{len(updated_ids)} obiect(e) actualizat(e) în '{table}'",
+        "ids": updated_ids
+    }
+    if warnings:
+        response["warnings"] = warnings
+
+    return jsonify(response), 200 if updated_ids else 404
 
 
 # Nivel 9: public vs admin

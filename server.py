@@ -6,7 +6,7 @@ from Modules.Auth import auth
 
 app = Flask(__name__)
 #CORS(app)
-app.config['DEBUG'] = True
+app.config['DEBUG'] = False
 
 app.register_blueprint(api, url_prefix="/")
 app.register_blueprint(auth, url_prefix="/")

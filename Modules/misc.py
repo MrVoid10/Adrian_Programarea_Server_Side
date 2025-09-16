@@ -22,7 +22,40 @@ with open('Prototip/users.json', 'r') as f:
 with open('Prototip/orders.json', 'r') as f:
   orders= json.load(f)["orders"]
 
-
+TABLE_SCHEMAS = {
+  "products": {
+    "id": 0,
+    "nume": "",
+    "brand": "",
+    "model": "",
+    "descriere": "",
+    "pret": 0.0,
+    "categorie": "",
+    "garantie": 0,
+    "imagine": "",
+    "data_adaugare": ""
+  },
+  "stock": {
+    "produs_id": 0,
+    "cantitate": 0,
+    "depozit": ""
+  },
+  "orders": {
+    "id": 0,
+    "client_id": 0,
+    "data_comanda": "",
+    "status": "",
+    "produse": []
+  },
+  "users": {
+    "id": 0,
+    "username": "",
+    "nume": "",
+    "email": "",
+    "password": "",
+    "role": "Client"
+  }
+}
 
 def add_user(username, password, nume="", email="", role="Client"):
   # Verificăm dacă username există deja
@@ -51,3 +84,18 @@ def add_user(username, password, nume="", email="", role="Client"):
     json.dump({"users": users}, f, indent=2)
 
   return new_user
+
+def load_table(table_name):
+    path = f"Prototip/{table_name}.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get(table_name, [])
+    except FileNotFoundError:
+        return []
+
+  
+def save_table(table_name, data):
+  path = f"Prototip/{table_name}.json"
+  with open(path, "w", encoding="utf-8") as f:
+    json.dump({table_name : data}, f, indent=2)
