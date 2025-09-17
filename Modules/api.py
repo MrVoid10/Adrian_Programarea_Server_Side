@@ -155,6 +155,7 @@ def delete_data(table=None):
     if not data:
         return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
 
+    # deducem tabelul dacă nu e în URL
     if not table:
         if len(data) != 1:
             return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
@@ -173,20 +174,62 @@ def delete_data(table=None):
     warnings = []
 
     for obj in objects:
-        obj_id = obj.get("id")
-        if obj_id is None:
-            warnings.append("Un obiect nu are id specificat și nu a fost șters")
+        obj_ids = obj.get("ids", [])
+        filter_criteria = obj.get("filter", {})
+
+        matched_items = []
+
+        # ștergere după ids
+        if obj_ids:
+            for i in obj_ids:
+                existing_obj = next((item for item in items if item.get("id") == i), None)
+                if existing_obj:
+                    matched_items.append(existing_obj)
+                else:
+                    warnings.append(f"Obiect cu id={i} nu există în '{table}'")
+
+        # ștergere după filter avansat
+        elif filter_criteria:
+            for item in items:
+                match = True
+                for k, v in filter_criteria.items():
+                    current_val = item.get(k)
+                    if isinstance(v, dict):
+                        if "like" in v:
+                            if not isinstance(current_val, str) or v["like"].lower() not in current_val.lower():
+                                match = False
+                                break
+                        min_val = v.get("min", float("-inf"))
+                        max_val = v.get("max", float("inf"))
+                        if isinstance(current_val, (int, float)):
+                            if not (min_val <= current_val <= max_val):
+                                match = False
+                                break
+                        else:
+                            if "min" in v or "max" in v:
+                                match = False
+                                break
+                    else:
+                        if current_val != v:
+                            match = False
+                            break
+                if match:
+                    matched_items.append(item)
+
+            if not matched_items:
+                warnings.append(f"Nu s-a găsit niciun obiect pentru filter-ul specificat în '{table}'")
+                continue
+
+        else:
+            warnings.append("Un obiect nu are ids sau filter specificat și nu a fost șters")
             continue
 
-        match_found = any(item.get("id") == obj_id for item in items)
-        if not match_found:
-            warnings.append(f"Obiect cu id={obj_id} nu există în '{table}'")
-            continue
+        # ștergem obiectele potrivite
+        for item in matched_items:
+            items = [i for i in items if i.get("id") != item.get("id")]
+            deleted_ids.append(item.get("id"))
 
-        items = [item for item in items if item.get("id") != obj_id]
-        deleted_ids.append(obj_id)
-
-    # Resortăm ID-urile pentru a fi consecutive
+    # resortăm ID-urile pentru a fi consecutive
     for index, item in enumerate(items, start=1):
         item["id"] = index
 
