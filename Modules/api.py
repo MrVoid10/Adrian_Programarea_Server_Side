@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request, abort
 from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table
+from flask_jwt_extended import jwt_required, get_jwt
+from Modules.jwt_utils import allowed_users
 
 api = Blueprint("api", __name__)
 
@@ -12,6 +14,7 @@ def get_list():
 @api.route("/produse", methods=["GET"])
 @api.route("/produse/<int:product_id>", methods=["GET"])
 @api.route("/details/<int:product_id>", methods=["GET"]) # conditila la nivel 6 #
+@allowed_users(["Client","Angajat", "Administrator"])  ##### verificare rol
 def get_product_details(product_id):
   if product_id is None:
     return jsonify(products)
@@ -24,6 +27,7 @@ def get_product_details(product_id):
 # Nivel 7.1 GET /stoc/{id} #
 @api.route("/stoc", methods=["GET"])
 @api.route("/stoc/<int:product_id>", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def get_stock_details(product_id):
   if product_id is None:
     return jsonify(stoc)
@@ -36,6 +40,7 @@ def get_stock_details(product_id):
 # Nivel 7.2 Get /comenzi/{id} #
 @api.route("/comenzi", methods=["GET"])
 @api.route("/comenzi/<int:order_id>", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def get_order_details(order_id=None):
   if order_id is None:
     return jsonify(orders)
@@ -48,6 +53,7 @@ def get_order_details(order_id=None):
   return jsonify(order)
 
 @api.route("/comenzi/search", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def search_orders():
   id_query = request.args.get("id")
   produs_id_query = request.args.get("produs_id")
@@ -102,13 +108,12 @@ def search_orders():
 # Nivel 9 /add #
 @api.route("/add", methods=["POST"])
 @api.route("/add/<string:table>", methods=["POST"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def add_data(table=None):
-    # preluăm datele JSON
     data = request.get_json() if request.is_json else request.args
     if not data:
         return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
 
-    # dacă tabelul nu e specificat în URL, îl deducem din JSON
     if not table:
         if len(data) != 1:
             return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
@@ -117,42 +122,25 @@ def add_data(table=None):
         objects = data
 
     table = table.lower()
-    
-    # încărcăm lista de obiecte
-    items = load_table(table)  # load_table returnează listă de dict-uri
-
-    # schema tabelului
+    items = load_table(table)
     schema = TABLE_SCHEMAS.get(table, {})
     if not schema:
         return jsonify({"error": f"Schema pentru '{table}' nu există"}), 400
 
-    # dacă data nu e listă, o transformăm într-una
     objects = objects if isinstance(objects, list) else [objects]
-
-    added_ids = []
-    warnings = []
+    added_ids, warnings = [], []
 
     for obj in objects:
-        # generăm id nou
         new_id = max((item.get("id", 0) for item in items), default=0) + 1
-        new_obj = {**schema, **obj}
-        new_obj["id"] = new_id
-
-        # verificăm câmpuri lipsă
+        new_obj = {**schema, **obj, "id": new_id}
         missing = [k for k in schema if k not in obj and k != "id"]
         if missing:
             warnings.append(f"Obiect id={new_id}: câmpuri lipsă completate automat: {', '.join(missing)}")
-
         items.append(new_obj)
         added_ids.append(new_id)
 
-    # salvăm lista actualizată
     save_table(table, items)
-
-    response = {
-        "message": f"{len(added_ids)} obiect(e) adăugat(e) în '{table}'",
-        "ids": added_ids
-    }
+    response = {"message": f"{len(added_ids)} obiect(e) adăugat(e) în '{table}'", "ids": added_ids}
     if warnings:
         response["warnings"] = warnings
 
@@ -161,6 +149,7 @@ def add_data(table=None):
 # Nivel 9 /delete cu resortare ID-uri
 @api.route("/delete", methods=["DELETE"])
 @api.route("/delete/<string:table>", methods=["DELETE"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def delete_data(table=None):
     data = request.get_json() if request.is_json else request.args
     if not data:
@@ -215,6 +204,7 @@ def delete_data(table=None):
 # Nivel 9 /update #
 @api.route("/update", methods=["PUT", "PATCH"])
 @api.route("/update/<string:table>", methods=["PUT", "PATCH"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
 def update_data(table=None):
     data = request.get_json() if request.is_json else request.args
     if not data:
@@ -324,18 +314,23 @@ def update_data(table=None):
 
     return jsonify(response), 200 if updated_ids else 404
 
+@api.route("/raport", methods=["GET"])
+@allowed_users(["Administrator"])  ##### verificare rol
+def generate_report():
+    total_produse = len(products)
+    total_comenzi = len(orders)
+    
+    valoare_totala_comenzi = 0
+    for comanda in orders:
+        for produs in comanda.get("produse", []):
+            pret = produs.get("pret_unitate", 0)
+            cantitate = produs.get("cantitate", 0)
+            valoare_totala_comenzi += pret * cantitate
 
-# Nivel 9: public vs admin
-# @api.route("/public/list", methods=["GET"])
-# def public_list():
-#   return jsonify([
-#     {"id": p["id"], "name": p["name"], "category": p["category"]}
-#     for p in products
-#   ])
+    raport = {
+        "total_produse": total_produse,
+        "total_comenzi": total_comenzi,
+        "valoare_totala_comenzi": valoare_totala_comenzi
+    }
 
-# # Nivel 10: doar admin
-# @api.route("/admin/reports", methods=["GET"])
-# def get_reports():
-#   if claims.get("role") != "Admin":
-#     abort(403, description="Acces interzis")
-#   return {"report": "Raport tehnic complet"}
+    return jsonify(raport), 200
