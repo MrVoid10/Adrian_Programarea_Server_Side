@@ -377,3 +377,94 @@ def generate_report():
     }
 
     return jsonify(raport), 200
+
+@api.route("/search", methods=["GET"])
+@api.route("/search/<string:table>", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])  ##### verificare rol
+def search_data(table=None):
+  data = request.get_json(silent=True) or request.args
+  queries = {}
+
+  if not table:
+    if data and len(data) > 0:
+      queries = data
+    else:
+      return jsonify({"error": "Trebuie să specifici tabele și criterii în body JSON sau query params"}), 400
+  else:
+    if data:
+      queries = {table.lower(): data if isinstance(data, list) else [data]}
+    else:
+      queries = {table.lower(): [request.args.to_dict()]}
+
+  response = {}
+
+  for tbl, filters in queries.items():
+    items = load_table(tbl)
+    if not isinstance(items, list):
+      response[tbl] = {"error": f"Structura tabelului '{tbl}' este invalidă"}
+      continue
+
+    matched = []
+    for f in filters:
+      for item in items:
+        ok = True
+        for k, v in f.items():
+
+          # ------------------ string global ------------------
+          if k == "string":
+            if isinstance(v, dict) and "like" in v:
+              val = v["like"].lower()
+              if not any(isinstance(cv, str) and val in cv.lower() for cv in item.values()):
+                ok = False
+                break
+            elif isinstance(v, str):
+              if not any(isinstance(cv, str) and v.lower() in cv.lower() for cv in item.values()):
+                ok = False
+                break
+            continue
+          # ---------------------------------------------------
+
+          # ------------------ number global ------------------
+          if k == "number":
+            if isinstance(v, dict):
+              min_val = v.get("min", float("-inf"))
+              max_val = v.get("max", float("inf"))
+              if not any(
+                isinstance(cv, (int, float)) and min_val <= cv <= max_val
+                for cv in item.values()
+              ):
+                ok = False
+                break
+            elif isinstance(v, (int, float)):
+              if not any(isinstance(cv, (int, float)) and cv == v for cv in item.values()):
+                ok = False
+                break
+            continue
+          # ---------------------------------------------------
+
+          current_val = item.get(k)
+          if isinstance(v, dict):
+            if "like" in v:
+              if not isinstance(current_val, str) or v["like"].lower() not in current_val.lower():
+                ok = False
+                break
+            min_val = v.get("min", float("-inf"))
+            max_val = v.get("max", float("inf"))
+            if isinstance(current_val, (int, float)):
+              if not (min_val <= current_val <= max_val):
+                ok = False
+                break
+            else:
+              if "min" in v or "max" in v:
+                ok = False
+                break
+          else:
+            if current_val != v:
+              ok = False
+              break
+        if ok:
+          matched.append(item)
+
+    response[tbl] = {"count": len(matched), "results": matched}
+
+  return jsonify(response), 200
