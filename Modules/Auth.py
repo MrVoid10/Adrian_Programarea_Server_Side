@@ -47,7 +47,7 @@ def register():
 # --------------------------
 @auth.route('/login', methods=['POST'])
 def login():
-    data = request.get_json() if request.is_json else request.args
+    data = request.get_json()
 
     username = data.get('username')
     password = data.get('password')
@@ -56,7 +56,10 @@ def login():
         return jsonify({'message': 'Username și parola sunt necesare'}), 400
 
     user = next((u for u in users if u['username'] == username), None)
-    if not user or not check_password_hash(user['password'], password):
+    hashed_password_from_user = user['password']
+    if not user or not check_password_hash(hashed_password_from_user, password):
+        print(user)
+        print(check_password_hash(hashed_password_from_user, password))
         return jsonify({'message': 'Credențiale invalide'}), 401
 
     access_token = create_access_token(

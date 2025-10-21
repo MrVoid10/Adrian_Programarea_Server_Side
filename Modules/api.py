@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request, abort
-from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table
+from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table, capitalize_name
 from Modules.jwt_utils import allowed_users
+from copy import deepcopy
 
 api = Blueprint("api", __name__)
 
@@ -354,6 +355,113 @@ def generate_report():
     }
 
     return jsonify(raport), 200
+
+# Laboratorul 2: --- Endpoint cu useri si transformarea lor in majuscula --- #
+@api.route("/users_Capitalization", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])
+@capitalize_name
+def users_Capitalization(users_list):
+  return jsonify({
+    "count": len(users_list),
+    "results": users_list
+  }), 200
+
+@api.route("/capital_search", methods=["GET"])
+@api.route("/capital_search/<string:table>", methods=["GET"])
+@allowed_users(["Angajat", "Administrator"])
+def capital_search(table=None):
+  data = request.get_json(silent=True)
+  if not data:
+    if table:
+      data = {table.lower(): [request.args.to_dict()]}
+    else:
+      data = {"users": [request.args.to_dict()]}
+  elif isinstance(data, list) and table:
+    data = {table.lower(): data}
+  elif isinstance(data, list) and not table:
+    data = {"users": data}
+  elif isinstance(data, dict) and table:
+    data = {table.lower(): [data]}
+
+  response = {}
+  for tbl, filters in data.items():
+    items = load_table(tbl)
+    if not isinstance(items, list):
+      response[tbl] = {"error": f"Structura tabelului '{tbl}' este invalidă"}
+      continue
+
+    modified_list = []
+    original_list = []
+
+    for item in items:
+      include_item = True
+      modified_fields = {}
+      for f in filters:
+        for k, v in f.items():
+          if k == "capital":
+            if isinstance(v, str) and v in item and isinstance(item[v], str):
+              modified_fields[v] = item[v].upper()
+            continue
+
+          if k == "string":
+            if isinstance(v, dict) and "like" in v:
+              val = v["like"].lower()
+              if not any(isinstance(cv, str) and val in cv.lower() for cv in item.values()):
+                include_item = False
+                break
+            elif isinstance(v, str):
+              if not any(isinstance(cv, str) and v.lower() in cv.lower() for cv in item.values()):
+                include_item = False
+                break
+            continue
+
+          if k == "number":
+            if isinstance(v, dict):
+              min_val = v.get("min", float("-inf"))
+              max_val = v.get("max", float("inf"))
+              if not any(isinstance(cv, (int, float)) and min_val <= cv <= max_val for cv in item.values()):
+                include_item = False
+                break
+            elif isinstance(v, (int, float)):
+              if not any(isinstance(cv, (int, float)) and cv == v for cv in item.values()):
+                include_item = False
+                break
+            continue
+
+          current_val = item.get(k)
+          if isinstance(v, dict):
+            if "like" in v:
+              if not isinstance(current_val, str) or v["like"].lower() not in current_val.lower():
+                include_item = False
+                break
+            min_val = v.get("min", float("-inf"))
+            max_val = v.get("max", float("inf"))
+            if isinstance(current_val, (int, float)):
+              if not (min_val <= current_val <= max_val):
+                include_item = False
+                break
+            else:
+              if "min" in v or "max" in v:
+                include_item = False
+                break
+          else:
+            if current_val != v:
+              include_item = False
+              break
+        if not include_item:
+          break
+
+      if include_item and modified_fields:
+        modified_list.append(modified_fields)
+        original_fields = {k: item[k] for k in modified_fields.keys()}
+        original_list.append(original_fields)
+
+    response[tbl] = {
+      "modified": {"count": len(modified_list), "results": modified_list},
+      "original": {"count": len(original_list), "results": original_list}
+    }
+
+  return jsonify(response), 200
 
 ################################################################################
 # LEGACY #
