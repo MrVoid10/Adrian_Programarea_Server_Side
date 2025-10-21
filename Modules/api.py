@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request, abort
-from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table, capitalize_name
+from Modules.misc import products,stock,users,orders,TABLE_SCHEMAS, load_table , save_table, capitalize_name, get_dto_class,UpdateDTO,DeleteDTO
 from Modules.jwt_utils import allowed_users
-from copy import deepcopy
+from pydantic import ValidationError
 
 api = Blueprint("api", __name__)
 
@@ -102,41 +102,55 @@ def search_data(table=None):
 @api.route("/add/<string:table>", methods=["POST"])
 @allowed_users(["Angajat", "Administrator"])
 def add_data(table=None):
-  data = request.get_json() if request.is_json else request.args
-  if not data:
-    return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
+    data = request.get_json() if request.is_json else request.args
+    if not data:
+        return jsonify({"error": "Trebuie trimis un obiect JSON sau ca argumente"}), 400
 
-  if not table:
-    if len(data) != 1:
-      return jsonify({"error": "Trebuie să specifici un singur tabel în body"}), 400
-    table, objects = next(iter(data.items()))
-  else:
-    objects = data
+    # dacă tabelul nu e specificat, preluăm primul key din JSON
+    if not table:
+        if isinstance(data, dict) and len(data) == 1:
+            table, objects = next(iter(data.items()))
+        else:
+            return jsonify({"error": "Trebuie să specifici un tabel"}), 400
+    else:
+        objects = data
 
-  table = table.lower()
-  items = load_table(table)
-  schema = TABLE_SCHEMAS.get(table, {})
-  if not schema:
-    return jsonify({"error": f"Schema pentru '{table}' nu există"}), 400
+    table = table.lower()
+    dto_class = get_dto_class(table)
+    if not dto_class:
+        return jsonify({"error": f"Nu există DTO pentru tabelul '{table}'"}), 400
 
-  objects = objects if isinstance(objects, list) else [objects]
-  added_ids, warnings = [], []
+    # normalizează la listă
+    objects = objects if isinstance(objects, list) else [objects]
 
-  for obj in objects:
-    new_id = max((item.get("id", 0) for item in items), default=0) + 1
-    new_obj = {**schema, **obj, "id": new_id}
-    missing = [k for k in schema if k not in obj and k != "id"]
-    if missing:
-      warnings.append(f"Obiect id={new_id}: câmpuri lipsă completate automat: {', '.join(missing)}")
-    items.append(new_obj)
-    added_ids.append(new_id)
+    validated_objects = []
+    errors = []
 
-  save_table(table, items)
-  response = {"message": f"{len(added_ids)} obiect(e) adăugat(e) în '{table}'", "ids": added_ids}
-  if warnings:
-    response["warnings"] = warnings
+    for i, obj in enumerate(objects):
+        try:
+            dto = dto_class(**obj)
+            validated_objects.append(dto.dict())
+        except Exception as e:
+            errors.append({"index": i, "error": str(e)})
 
-  return jsonify(response), 201
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    # încărcăm datele existente și adăugăm id-uri
+    items = load_table(table)
+    added_ids = []
+    for obj in validated_objects:
+        new_id = max((item.get("id", 0) for item in items), default=0) + 1
+        if "id" in obj:
+            obj["id"] = new_id
+        items.append(obj)
+        added_ids.append(new_id)
+
+    save_table(table, items)
+    return jsonify({
+        "message": f"{len(added_ids)} obiect(e) adăugat(e) în '{table}'",
+        "ids": added_ids
+    }), 201
 
 # Nivel 8 --- Modificari "PUT & PATCH" --- #
 @api.route("/update", methods=["PUT", "PATCH"])
@@ -165,8 +179,16 @@ def update_data(table=None):
   warnings = []
 
   for obj in objects:
-    update_fields = obj.get("update")
-    filter_criteria = obj.get("filter", {})
+    try:
+      dto = UpdateDTO(**obj)
+    except ValidationError as e:
+      return jsonify({"error": e.errors()}), 400
+    
+    # update_fields = obj.get("update")
+    # filter_criteria = obj.get("filter", {})
+
+    update_fields = dto.update
+    filter_criteria = dto.filter
 
     if not update_fields:
       warnings.append("Nu există câmpuri de actualizat (cheia 'update' lipsește)")
@@ -183,34 +205,31 @@ def update_data(table=None):
       for k, v in filter_criteria.items():
         current_val = item.get(k)
 
-        if isinstance(v, dict):
-          if "string" in v:
-            str_val = v["string"]
-            if isinstance(str_val, dict):
-              str_val = str_val.get("like")
-            if not isinstance(current_val, str) or (str_val and str_val.lower() not in current_val.lower()):
+        # String: aplica like dacă e string
+        if isinstance(current_val, str):
+          if isinstance(v, dict) and "like" in v:
+            like_val = v["like"]
+            if like_val and like_val.lower() not in current_val.lower():
+              match = False
+              break
+          elif isinstance(v, str) and v.lower() not in current_val.lower():
+            match = False
+            break
+
+        # Numeric: aplica egalitate sau min/max
+        elif isinstance(current_val, (int, float)):
+          if isinstance(v, dict):
+            min_val = v.get("min", float("-inf"))
+            max_val = v.get("max", float("inf"))
+            if not (min_val <= current_val <= max_val):
+              match = False
+              break
+          elif isinstance(v, (int, float)):
+            if current_val != v:
               match = False
               break
 
-          if "number" in v:
-            num_val = v["number"]
-            if isinstance(num_val, (int, float)):
-              if current_val != num_val:
-                match = False
-                break
-            elif isinstance(num_val, dict):
-              min_val = num_val.get("min", float("-inf"))
-              max_val = num_val.get("max", float("inf"))
-              if not (isinstance(current_val, (int, float)) and min_val <= current_val <= max_val):
-                match = False
-                break
-            elif isinstance(num_val, list):
-              if current_val not in num_val:
-                match = False
-                break
-            else:
-              match = False
-              break
+        # Alte tipuri: verificare egalitate simplă
         else:
           if current_val != v:
             match = False
@@ -223,9 +242,10 @@ def update_data(table=None):
       warnings.append(f"Nu s-a găsit niciun obiect pentru filter-ul specificat în '{table}'")
       continue
 
+    # Aplicare update
     for item in matched_items:
       for key, value in update_fields.items():
-        if key == "id":
+        if key == "id":  # nu schimbăm ID-ul
           continue
         item[key] = value
       updated_ids.append(item.get("id"))
@@ -268,58 +288,68 @@ def delete_data(table=None):
   warnings = []
 
   for obj in objects:
-    obj_ids = obj.get("ids", [])
-    filter_criteria = obj.get("filter", {})
+    dto = DeleteDTO(obj)
+    filter_criteria = dto.filter
 
     matched_items = []
 
-    if obj_ids:
-      for i in obj_ids:
-        existing_obj = next((item for item in items if item.get("id") == i), None)
-        if existing_obj:
-          matched_items.append(existing_obj)
-        else:
-          warnings.append(f"Obiect cu id={i} nu există în '{table}'")
+    for item in items:
+      match = True
 
-    elif filter_criteria:
-      for item in items:
-        match = True
-        for k, v in filter_criteria.items():
-          current_val = item.get(k)
-          if isinstance(v, dict):
-            if "like" in v:
-              if not isinstance(current_val, str) or v["like"].lower() not in current_val.lower():
-                match = False
-                break
-            min_val = v.get("min", float("-inf"))
-            max_val = v.get("max", float("inf"))
-            if isinstance(current_val, (int, float)):
-              if not (min_val <= current_val <= max_val):
-                match = False
-                break
-            else:
-              if "min" in v or "max" in v:
-                match = False
-                break
-          else:
-            if current_val != v:
-              match = False
+      for k, v in filter_criteria.items():
+        # universal string "like"
+        if k == "string" and isinstance(v, dict):
+          like_val = v.get("like")
+          string_match = False
+          for field, val in item.items():
+            if isinstance(val, str) and like_val and like_val.lower() in val.lower():
+              string_match = True
               break
-        if match:
-          matched_items.append(item)
+          if not string_match:
+            match = False
+            break
 
-      if not matched_items:
-        warnings.append(f"Nu s-a găsit niciun obiect pentru filter-ul specificat în '{table}'")
-        continue
+        # universal number min/max
+        elif k == "number" and isinstance(v, dict):
+          min_val = v.get("min", float("-inf"))
+          max_val = v.get("max", float("inf"))
+          number_match = False
+          for field, val in item.items():
+            if isinstance(val, (int, float)) and min_val <= val <= max_val:
+              number_match = True
+              break
+          if not number_match:
+            match = False
+            break
 
-    else:
-      warnings.append("Un obiect nu are ids sau filter specificat și nu a fost șters")
+        # filtrare pe câmp numeric specific
+        elif isinstance(v, dict) and ("min" in v or "max" in v):
+          current_val = item.get(k)
+          min_val = v.get("min", float("-inf"))
+          max_val = v.get("max", float("inf"))
+          if not (isinstance(current_val, (int, float)) and min_val <= current_val <= max_val):
+            match = False
+            break
+
+        # filtrare exact pe câmp
+        else:
+          current_val = item.get(k)
+          if current_val != v:
+            match = False
+            break
+
+      if match:
+        matched_items.append(item)
+
+    if not matched_items:
+      warnings.append(f"Nu s-a găsit niciun obiect pentru filter-ul specificat în '{table}'")
       continue
 
     for item in matched_items:
       items = [i for i in items if i.get("id") != item.get("id")]
       deleted_ids.append(item.get("id"))
 
+  # recalculăm ID-urile
   for index, item in enumerate(items, start=1):
     item["id"] = index
 

@@ -1,8 +1,10 @@
 # misc.py
 import json
-from werkzeug.security import generate_password_hash
 from functools import wraps
 from copy import deepcopy
+from pydantic import BaseModel, HttpUrl, validator,RootModel,field_validator,Field
+from datetime import date
+from typing import List, Union,Optional,Any,Dict
 
 with open('Modules/settings.json', 'r') as f:
   config = json.load(f)
@@ -137,4 +139,78 @@ def capitalize_name(f):
     return f(users_copy, *args, **kwargs)
   return decorated
 
-# ? #
+# DTO și Validare #
+
+
+class ProductDTO(BaseModel):
+    id: Optional[int] = None
+    nume: str
+    brand: str
+    model: str
+    descriere: Optional[str] = ""
+    pret: float
+    categorie: str
+    garantie: Optional[int] = 0
+    imagine: Optional[str] = ""
+    data_adaugare: Optional[str] = None
+
+    @validator("pret")
+    def pret_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError("Pretul trebuie să fie pozitiv")
+        return v
+
+# DTO pentru tabelul stock
+class StockDTO(BaseModel):
+    produs_id: int
+    cantitate: int
+    depozit: str
+
+# DTO pentru tabelul orders
+class OrderDTO(BaseModel):
+    client_id: int
+    data_comanda: str
+    status: str
+    produse: List[Any] = []
+
+# DTO pentru tabelul users
+class UserDTO(BaseModel):
+    username: str
+    nume: str
+    email: str
+    password: str
+    role: Optional[str] = "Client"
+    is_active: Optional[bool] = True
+
+TABLE_DTOS = {
+    "products": ProductDTO,
+    "stock": StockDTO,
+    "orders": OrderDTO,
+    "users": UserDTO
+}
+
+def get_dto_class(table_name: str):
+    table_name = table_name.lower()
+    return TABLE_DTOS.get(table_name)
+
+class UpdateDTO(BaseModel):
+  filter: Any
+  update: Any
+
+  @validator("update")
+  def update_not_empty(cls, v):
+    if not v:
+      raise ValueError("Update nu poate fi gol")
+    return v
+  
+# /delete #
+
+class DeleteDTO(BaseModel):
+  filter: Any
+
+  @validator("filter")
+  def filter_not_empty(cls, v):
+    # verificăm să fie cel puțin un criteriu
+    if not (v.string or v.number or v.exact):
+      raise ValueError("Filter nu poate fi gol – trebuie să conțină cel puțin un criteriu")
+    return v
