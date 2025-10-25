@@ -9,6 +9,9 @@ auth = Blueprint("auth", __name__)
 # --------------------------
 # REGISTER / SIGNUP
 # --------------------------
+# --------------------------
+# REGISTER / SIGNUP
+# --------------------------
 @auth.route('/signup', methods=['POST'])
 @auth.route('/register', methods=['POST'])
 def register():
@@ -16,7 +19,7 @@ def register():
 
     username = data.get('username')
     password = data.get('password')
-    nume = data.get('nume', '')
+    nume = data.get('nume') or data.get('name') or ''
     email = data.get('email', '')
 
     if not username or not password:
@@ -39,8 +42,12 @@ def register():
         expires_delta=timedelta(hours=1)
     )
 
-    return jsonify({'message': 'User înregistrat cu succes!', 'access_token': access_token}), 201
-
+    return jsonify({
+        'message': 'User înregistrat cu succes!',
+        'access_token': access_token,
+        'name': new_user['nume'],
+        'role': new_user['role']
+    }), 201
 
 # --------------------------
 # LOGIN
@@ -56,10 +63,7 @@ def login():
         return jsonify({'message': 'Username și parola sunt necesare'}), 400
 
     user = next((u for u in users if u['username'] == username), None)
-    hashed_password_from_user = user['password']
-    if not user or not check_password_hash(hashed_password_from_user, password):
-        print(user)
-        print(check_password_hash(hashed_password_from_user, password))
+    if not user or not check_password_hash(user['password'], password):
         return jsonify({'message': 'Credențiale invalide'}), 401
 
     access_token = create_access_token(
@@ -69,5 +73,7 @@ def login():
 
     return jsonify({
         'message': f'Bine ai venit, {user["nume"]}!',
-        'access_token': access_token
+        'access_token': access_token,
+        'name': user['nume'],
+        'role': user['role']
     }), 200

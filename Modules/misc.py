@@ -26,13 +26,6 @@ with open('Prototip/users.json', 'r') as f:
 with open('Prototip/orders.json', 'r') as f:
   orders= json.load(f)["orders"]
 
-with open('Prototip/camere.json', 'r') as f:
-  camere= json.load(f)["camere"]
-
-with open('Prototip/detalii_camera.json', 'r') as f:
-  detalii_camera= json.load(f)["detalii_camera"]
-
-
 TABLE_SCHEMAS = {
   "products": {
     "id": 0,
@@ -204,13 +197,31 @@ class UpdateDTO(BaseModel):
     return v
   
 # /delete #
-
 class DeleteDTO(BaseModel):
   filter: Any
 
-  @validator("filter")
+  @field_validator("filter", mode="after")
+  @classmethod
   def filter_not_empty(cls, v):
-    # verificăm să fie cel puțin un criteriu
-    if not (v.string or v.number or v.exact):
+    # trebuie să fie dict, altfel invalid
+    if not isinstance(v, dict):
+      raise ValueError("Filter trebuie să fie un obiect (dict)")
+
+    # verifică dacă există cel puțin un câmp valid în oricare subdict
+    has_criteria = False
+    for key, value in v.items():
+      if isinstance(value, dict):
+        # verificăm câmpurile comune: like, string, exact, min, max
+        if any(k in value and value[k] not in (None, "", []) for k in ("like", "string", "exact", "min", "max")):
+          has_criteria = True
+          break
+      elif value not in (None, "", []):
+        # dacă valoarea e directă, nu dict (ex: {"id": 5})
+        has_criteria = True
+        break
+
+    if not has_criteria:
       raise ValueError("Filter nu poate fi gol – trebuie să conțină cel puțin un criteriu")
+
     return v
+

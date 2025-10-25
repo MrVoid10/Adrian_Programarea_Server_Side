@@ -288,7 +288,7 @@ def delete_data(table=None):
   warnings = []
 
   for obj in objects:
-    dto = DeleteDTO(obj)
+    dto = DeleteDTO(**obj)
     filter_criteria = dto.filter
 
     matched_items = []
@@ -328,6 +328,13 @@ def delete_data(table=None):
           min_val = v.get("min", float("-inf"))
           max_val = v.get("max", float("inf"))
           if not (isinstance(current_val, (int, float)) and min_val <= current_val <= max_val):
+            match = False
+            break
+
+        elif isinstance(v, dict) and "like" in v and k not in ["string", "number"]:
+          like_val = v["like"]
+          current_val = item.get(k)
+          if not (isinstance(current_val, (str, int, float)) and like_val and str(like_val).lower() in str(current_val).lower()):
             match = False
             break
 
