@@ -36,6 +36,7 @@ TABLE_SCHEMAS = {
     "pret": 0.0,
     "categorie": "",
     "garantie": 0,
+    "status": "",
     "imagine": "",
     "data_adaugare": ""
   },
@@ -60,6 +61,12 @@ TABLE_SCHEMAS = {
     "role": "Client",
     "is_active": True
   }
+}
+
+SENSITIVE_FIELDS = {
+    "users": ["password", "email"],
+    "products": ["imagine"], 
+    "orders": ["produse"]
 }
 
 def add_user(username, password, nume="", email="", role="Client"):
@@ -144,6 +151,7 @@ class ProductDTO(BaseModel):
     pret: float
     categorie: str
     garantie: Optional[int] = 0
+    status: Optional[str] = "testare"
     imagine: Optional[str] = ""
     data_adaugare: Optional[str] = None
 
