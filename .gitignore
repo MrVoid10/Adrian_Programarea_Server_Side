@@ -9,3 +9,7 @@ __pycache__/
 # Ignore all folders named Prototip
 Prototip/
 **/Prototip/
+
+Modules/camere.json
+Modules/camere backup.json
+Modules/contact_messages.json

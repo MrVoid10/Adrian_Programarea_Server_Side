@@ -3,6 +3,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from Modules.misc import users, add_user
 from datetime import timedelta
+import re
 
 auth = Blueprint("auth", __name__)
 
@@ -24,6 +25,10 @@ def register():
 
     if not username or not password:
         return jsonify({'message': 'Username și parola sunt necesare'}), 400
+    
+    if email and not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email):
+        return jsonify({'message': 'Email invalid'}), 400
+
 
     if any(u['username'] == username for u in users):
         return jsonify({'message': 'Username-ul există deja'}), 409
