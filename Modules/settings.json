@@ -1,13 +1,15 @@
 {
-  "username": "API_Server",
-  "password": "ParolaExtremDeSecreta",
-  "database": "Hotel",
-  "server": "MariusPC\\SQLEXPRESS",
+  "db": {
+    "username": "API_Hotel",
+    "password": "API_Hotel",
+    "database": "Hotel",
+    "server": "localhost\\SQLExpress"
+  },
   "ssl_context": {
     "cert": "SSL_Certificates/cert.pem",
     "key": "SSL_Certificates/key.pem"
   },
   "jwt_secret_key": "Cheie_Secreta",
-  "allowed_terms": ["query","sql", "test", "sql query","TESTSQL"],
-  "static_frontend_folder":"E:/Programare/Anul_4/Programarea_Avansata/Laborator2/User_Side/dist/User_Side/browser"
+  "allowed_terms": ["query", "sql", "test", "sql query", "TESTSQL"],
+  "static_frontend_folder": "E:/Programare/Anul_4/Programarea_Avansata/Laborator2/User_Side/dist/User_Side/browser"
 }

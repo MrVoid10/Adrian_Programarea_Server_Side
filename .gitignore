@@ -10,6 +10,9 @@ __pycache__/
 Prototip/
 **/Prototip/
 
+templates/
+
 Modules/camere.json
 Modules/camere backup.json
 Modules/contact_messages.json
+Modules/old_api.py

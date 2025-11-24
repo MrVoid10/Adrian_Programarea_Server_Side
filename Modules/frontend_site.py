@@ -1,113 +1,120 @@
 from flask import Blueprint, jsonify, abort, request
-import json
-import os
 from Modules.jwt_utils import allowed_users
+from Modules.SQLModels import db, Camera, CameraDisponibila, Feedback
+from datetime import datetime
+
 frontend_site = Blueprint("frontend", __name__)
 
-# Citește camerele din JSON la pornirea serverului
-CAMERE_FILE = os.path.join("Modules", "camere.json")
-with open(CAMERE_FILE, "r") as f:
-    camere_data = json.load(f)["camere"]
-
-# Dicționar pentru acces rapid după id
-camere_dict = {c["id"]: c for c in camere_data}
-
 # ========================
-# Endpoint pentru lista camere
+# List of camera types
 # ========================
 @frontend_site.route("/lista_camere", methods=["GET"])
 def get_list():
-    camere_scurte = []
-    for c in camere_data:
-        cam = c.copy()
-        cam.pop("camereDisponibile", None)
-        camere_scurte.append(cam)
+    camere = Camera.query.all()
+    print("DEBUG: camere query returned:", camere)  # ✅ print raw SQLAlchemy objects
+
+    camere_scurte = [
+        {
+            "Id": c.Id,
+            "Nume": c.Nume,
+            "Pret": c.Pret,
+            "Moneda": c.Moneda,
+            "Imagine": c.Imagine,
+            "Descriere": c.Descriere
+        }
+        for c in camere
+    ]
+
+    print("DEBUG: camere_scurte:", camere_scurte)  # ✅ print formatted list
     return jsonify(camere_scurte)
 
 
 # ========================
-# Endpoint pentru detalii camera
+# Detalii camera
 # ========================
 @frontend_site.route("/detalii_camera/<string:id>", methods=["GET"])
 def get_camera(id):
-    key = id.lower()
-    if key not in camere_dict:
+    camera = Camera.query.filter_by(Id=id).first()
+    print(f"DEBUG: query camera id={id} returned:", camera)
+
+    if not camera:
         abort(404, description=f"Camera cu id '{id}' nu a fost găsită")
-    return jsonify(camere_dict[key])
+
+    camere_disp = [
+        {"Id": cd.Id, "Libera": cd.Libera} for cd in camera.camere_disponibile
+    ]
+    print("DEBUG: camere disponibile:", camere_disp)
+
+    camera_dict = {
+        "Id": camera.Id,
+        "Nume": camera.Nume,
+        "Pret": camera.Pret,
+        "Moneda": camera.Moneda,
+        "Imagine": camera.Imagine,
+        "Descriere": camera.Descriere,
+        "camereDisponibile": camere_disp
+    }
+
+    print("DEBUG: final camera_dict:", camera_dict)
+    return jsonify(camera_dict)
+
 
 # ========================
-# Endpoint pentru rezervare cameră
+# Rezervare cameră
 # ========================
 @frontend_site.route("/rezerva_camera", methods=["POST"])
-@allowed_users(["Client","Angajat", "Administrator"])
+@allowed_users(["Client", "Angajat", "Administrator"])
 def rezerva_camera():
     data = request.json
+    print("DEBUG: rezervare payload:", data)
+
     camera_tip = data.get("camera_id")
     camera_id = data.get("camera_disponibila_id")
 
     if not camera_tip or not camera_id:
         abort(400, description="Trebuie să specifici 'camera_id' și 'camera_disponibila_id'")
 
-    if camera_tip not in camere_dict:
-        abort(404, description=f"Camera tip '{camera_tip}' nu a fost găsită")
+    cam_disp = CameraDisponibila.query.filter_by(Id=camera_id, CameraId=camera_tip).first()
+    print(f"DEBUG: CameraDisponibila query returned: {cam_disp}")
 
-    camere_disponibile = camere_dict[camera_tip]["camereDisponibile"]
+    if not cam_disp:
+        abort(404, description=f"Camera disponibilă '{camera_id}' nu a fost găsită")
+    if not cam_disp.Libera:
+        abort(400, description=f"Camera {camera_id} este deja rezervată")
 
-    # 🔍 Căutăm camera specifică
-    for cam in camere_disponibile:
-        if cam["id"] == camera_id:
-            if not cam["libera"]:
-                abort(400, description=f"Camera {camera_id} este deja rezervată")
+    cam_disp.Libera = False
+    db.session.commit()
+    print(f"DEBUG: Camera {camera_id} marked as reserved")
 
-            # ✅ Marcăm ca rezervată
-            cam["libera"] = False
+    return jsonify({
+        "status": "succes",
+        "camera_id": camera_id,
+        "camera_tip": camera_tip,
+        "mesaj": f"Camera {camera_id} din tipul {camera_tip} a fost rezervată cu succes."
+    })
 
-            # 🔒 Salvăm modificările în fișierul JSON
-            try:
-                with open(CAMERE_FILE, "w") as f:
-                    json.dump({"camere": camere_data}, f, indent=2)
-            except Exception as e:
-                abort(500, description=f"Eroare la salvarea fișierului: {e}")
 
-            return jsonify({
-                "status": "succes",
-                "camera_id": camera_id,
-                "camera_tip": camera_tip,
-                "mesaj": f"Camera {camera_id} din tipul {camera_tip} a fost rezervată cu succes."
-            })
-
-    abort(404, description=f"Camera disponibilă '{camera_id}' nu a fost găsită")
-
-CONTACT_FILE = os.path.join("Modules", "contact_messages.json")
-
+# ========================
+# Feedback/contact
+# ========================
 @frontend_site.route("/contact", methods=["POST"])
 def contact():
     data = request.json
+    print("DEBUG: contact payload:", data)
+
     if not data or "name" not in data or "email" not in data or "message" not in data:
         abort(400, description="Date invalide")
 
-    # Creează fișierul dacă nu există
-    if not os.path.exists(CONTACT_FILE):
-        with open(CONTACT_FILE, "w") as f:
-            json.dump([], f)
+    date_sent = datetime.strptime(data.get("date"), "%d.%m.%Y, %H:%M:%S") if data.get("date") else datetime.utcnow()
+    feedback = Feedback(
+        Name=data["name"],
+        Email=data["email"],
+        Message=data["message"],
+        DateSent=date_sent
+    )
 
-    # Citește mesajele existente
-    with open(CONTACT_FILE, "r") as f:
-        try:
-            msgs = json.load(f)
-        except json.JSONDecodeError:
-            msgs = []
-
-    # Adaugă mesajul nou
-    msgs.append({
-        "name": data["name"],
-        "email": data["email"],
-        "message": data["message"],
-        "date": data.get("date")
-    })
-
-    # Salvează înapoi
-    with open(CONTACT_FILE, "w") as f:
-        json.dump(msgs, f, indent=2)
+    db.session.add(feedback)
+    db.session.commit()
+    print("DEBUG: Feedback saved:", feedback)
 
     return jsonify({"status": "success"})
